@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>School2Me Help</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #fff7f8;
+        --surface: #ffffff;
+        --border: #fecdd3;
+        --text: #1f2937;
+        --muted: #4b5563;
+        --accent: #e11d48;
+      }
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+      .container {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 24px 16px 40px;
+      }
+      .card {
+        background: var(--surface);
+        border: 2px solid var(--border);
+        border-radius: 18px;
+        padding: 18px;
+        margin-bottom: 14px;
+      }
+      h1, h2, h3 { margin: 0 0 10px; }
+      h1 { font-size: 1.9rem; color: var(--accent); }
+      h2 { font-size: 1.25rem; }
+      h3 { font-size: 1rem; }
+      p, li { line-height: 1.5; color: var(--muted); }
+      ul, ol { margin: 8px 0 0 20px; }
+      code {
+        background: #fef2f2;
+        border-radius: 6px;
+        padding: 1px 5px;
+      }
+      .small { font-size: .92rem; }
+      a { color: #be123c; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <section class="card">
+        <h1>School2Me Help Center</h1>
+        <p>
+          This standalone guide explains all user-facing features of School2Me.
+          It is intentionally public and can be opened directly at <code>/help.html</code> without logging in.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>What School2Me Does</h2>
+        <p>
+          School2Me centralizes school communications into a family timeline. You can sign in without a password,
+          invite family members, track events per child/activity, and manage admin delivery/webhook settings.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Authentication Features</h2>
+        <h3>1) Magic Link Login</h3>
+        <ol>
+          <li>Go to the Auth page.</li>
+          <li>Select <strong>Magic Link</strong>.</li>
+          <li>Enter your email and Turnstile response.</li>
+          <li>Request link, then verify with the token from your email.</li>
+        </ol>
+        <h3>2) Email 2FA Login</h3>
+        <ol>
+          <li>Select <strong>Email 2FA</strong>.</li>
+          <li>Enter email and Turnstile response.</li>
+          <li>Request code and submit the 6-digit code.</li>
+        </ol>
+        <h3>3) Join Family (Share Name + Password)</h3>
+        <ol>
+          <li>Select <strong>Join (Share Name + Password)</strong>.</li>
+          <li>Enter your email, share name, and share password.</li>
+          <li>Submit to join the family account.</li>
+        </ol>
+        <h3>4) Join Family (Share Link Token)</h3>
+        <ol>
+          <li>Select <strong>Join (Share Link/QR Token)</strong>.</li>
+          <li>Enter your email and token from share link/QR text.</li>
+          <li>Submit to join.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Dashboard (Family Timeline)</h2>
+        <ul>
+          <li>View upcoming parsed events grouped by day.</li>
+          <li>Filter by child or by activity.</li>
+          <li>See title, schedule, location, description, and “Needs Review” indicator.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Settings</h2>
+        <h3>Children</h3>
+        <ul>
+          <li>Add child records (name, class, teacher).</li>
+          <li>Review existing child list.</li>
+        </ul>
+        <h3>Activities</h3>
+        <ul>
+          <li>Add activities to a specific child.</li>
+          <li>Supported activity types: school club, hobby, sports, volunteering.</li>
+        </ul>
+        <h3>Invites</h3>
+        <ul>
+          <li>Generate share credentials for family onboarding.</li>
+          <li>Receive share link and token text for QR workflows.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Admin Panel</h2>
+        <ul>
+          <li>Separate admin login (email + password).</li>
+          <li>Configure SMTP host/port/user/pass.</li>
+          <li>Configure webhook API key used by inbound email webhook.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Public Integrations</h2>
+        <ul>
+          <li>Calendar feed: <code>/feeds/&lt;routing_alias&gt;/calendar.ics</code></li>
+          <li>RSS feed: <code>/feeds/&lt;routing_alias&gt;/rss</code></li>
+          <li>Join link handoff: <code>/join/&lt;token&gt;</code></li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Troubleshooting</h2>
+        <ul>
+          <li><strong>Unauthorized:</strong> session cookie may be missing/expired; log in again.</li>
+          <li><strong>CSRF errors:</strong> reload app to refresh token cookie and retry.</li>
+          <li><strong>Turnstile failed:</strong> verify token is valid and keys are configured.</li>
+          <li><strong>No events:</strong> check webhook key and inbound payload fields.</li>
+          <li><strong>No email delivery:</strong> verify SMTP settings in Admin.</li>
+        </ul>
+        <p class="small">
+          For technical details, see repository docs:
+          <code>/docs/technical-reference.md</code> and <code>/docs/installation-guide.md</code>.
+        </p>
+      </section>
+    </div>
+  </body>
+</html>
