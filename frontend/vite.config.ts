@@ -39,5 +39,10 @@ export default defineConfig({
         enabled: true
       }
     })
-  ]
+  ],
+  preview: {
+    host: true,
+    port: 4020,
+    allowedHosts: ['school2me.jahosi.co.uk']
+  }
 });
