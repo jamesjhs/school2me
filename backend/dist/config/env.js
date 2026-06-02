@@ -4,7 +4,7 @@ import { z } from 'zod';
 dotenv.config();
 const envSchema = z.object({
     NODE_ENV: z.enum(['production', 'development']).default('development'),
-    PORT: z.coerce.number().int().positive().default(3000),
+    PORT: z.coerce.number().int().positive().default(4020),
     TRUST_PROXY: z.coerce.number().int().min(0).default(0),
     DB_PATH: z.string().min(1).refine((value) => isAbsolute(value), 'DB_PATH must be absolute'),
     DB_ENCRYPTION_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/),
@@ -16,8 +16,7 @@ const envSchema = z.object({
     SMTP_PASS: z.string().min(1),
     ADMIN_EMAIL: z.string().email(),
     ADMIN_PASSWORD_HASH: z.string().min(20),
-    RESEND_API_KEY: z.string().min(1),
-    RESEND_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
+    WEBHOOK_API_KEY: z.string().min(1),
     OPENAI_API_KEY: z.string().min(1),
     FRONTEND_BASE_URL: z.string().url().default('http://localhost:5173'),
     PUBLIC_BASE_URL: z.string().url().default('https://school2me.jahosi.co.uk')

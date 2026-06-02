@@ -38,8 +38,13 @@ const extractEmailAddress = (value: unknown): string | undefined => {
     return undefined;
   }
 
-  const angleMatch = extracted.match(/<([^>]+)>/);
-  return (angleMatch?.[1] ?? extracted).trim();
+  const start = extracted.indexOf('<');
+  const end = extracted.indexOf('>', start + 1);
+  if (start >= 0 && end > start + 1) {
+    return extracted.slice(start + 1, end).trim();
+  }
+
+  return extracted.trim();
 };
 
 const readPayloadField = (payload: any, key: string): unknown => payload?.data?.[key] ?? payload?.[key];
@@ -53,9 +58,13 @@ const getWebhookApiKey = (): string => {
 
 const webhookKeyMatches = (providedKey: string): boolean => {
   const expectedKey = getWebhookApiKey();
-  const providedHash = crypto.createHash('sha256').update(providedKey).digest();
-  const expectedHash = crypto.createHash('sha256').update(expectedKey).digest();
-  return crypto.timingSafeEqual(providedHash, expectedHash);
+  const providedBuffer = Buffer.from(providedKey);
+  const expectedBuffer = Buffer.from(expectedKey);
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
 receiveRouter.post('/', webhookRateLimiter, express.raw({ type: 'application/json' }), async (req, res) => {

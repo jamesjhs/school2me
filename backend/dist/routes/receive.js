@@ -1,52 +1,73 @@
 import express from 'express';
-import { Resend } from 'resend';
+import crypto from 'node:crypto';
 import { env } from '../config/env.js';
 import { db } from '../database/db.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { parseEmailAndPersistEvents } from '../services/openaiParser.js';
 import { generateUuidBuffer } from '../utils/uuid.js';
-const resend = new Resend(env.RESEND_API_KEY);
 const webhookRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120 });
 export const receiveRouter = express.Router();
-const extractEmailId = (verifiedPayload) => {
-    return (verifiedPayload?.data?.email_id ??
-        verifiedPayload?.data?.emailId ??
-        verifiedPayload?.email_id ??
-        verifiedPayload?.emailId);
+const extractString = (value) => {
+    if (typeof value === 'string') {
+        return value.trim();
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const extracted = extractString(item);
+            if (extracted) {
+                return extracted;
+            }
+        }
+    }
+    if (typeof value === 'object' && value !== null) {
+        const record = value;
+        return extractString(record.email) ?? extractString(record.address) ?? extractString(record.value);
+    }
+    return undefined;
+};
+const extractEmailAddress = (value) => {
+    const extracted = extractString(value);
+    if (!extracted) {
+        return undefined;
+    }
+    const angleMatch = extracted.match(/<([^>]+)>/);
+    return (angleMatch?.[1] ?? extracted).trim();
+};
+const readPayloadField = (payload, key) => payload?.data?.[key] ?? payload?.[key];
+const getWebhookApiKey = () => {
+    const row = db
+        .prepare('SELECT value FROM app_settings WHERE key = ? LIMIT 1')
+        .get('webhook_api_key');
+    return row?.value ?? env.WEBHOOK_API_KEY;
+};
+const webhookKeyMatches = (providedKey) => {
+    const expectedKey = getWebhookApiKey();
+    const providedHash = crypto.createHash('sha256').update(providedKey).digest();
+    const expectedHash = crypto.createHash('sha256').update(expectedKey).digest();
+    return crypto.timingSafeEqual(providedHash, expectedHash);
 };
 receiveRouter.post('/', webhookRateLimiter, express.raw({ type: 'application/json' }), async (req, res) => {
-    const id = req.header('svix-id');
-    const timestamp = req.header('svix-timestamp');
-    const signature = req.header('svix-signature');
-    if (!id || !timestamp || !signature) {
-        return res.status(400).json({ error: 'Missing webhook headers' });
+    const providedWebhookKey = req.header('x-jahosi-webhook-key');
+    if (!providedWebhookKey) {
+        return res.status(401).json({ error: 'Missing webhook API key' });
     }
-    const payload = req.body.toString('utf-8');
-    let verified;
+    if (!webhookKeyMatches(providedWebhookKey)) {
+        return res.status(401).json({ error: 'Invalid webhook API key' });
+    }
+    const rawPayload = req.body.toString('utf-8');
+    let payload;
     try {
-        verified = resend.webhooks.verify({
-            payload,
-            headers: { id, timestamp, signature },
-            webhookSecret: env.RESEND_WEBHOOK_SECRET
-        });
+        payload = JSON.parse(rawPayload);
     }
     catch {
-        return res.status(401).json({ error: 'Invalid webhook signature' });
+        return res.status(400).json({ error: 'Invalid webhook payload' });
     }
     res.status(200).json({ received: true });
     setImmediate(async () => {
         try {
-            const emailId = extractEmailId(verified);
-            if (!emailId) {
-                return;
-            }
-            const fetched = await resend.emails.get(emailId);
-            if (fetched.error || !fetched.data) {
-                return;
-            }
-            const toAddress = fetched.data.to?.[0] ?? '';
-            const alias = toAddress.split('@')[0]?.toLowerCase();
-            if (!alias) {
+            const toAddress = extractEmailAddress(readPayloadField(payload, 'to') ?? readPayloadField(payload, 'recipient'));
+            const alias = toAddress?.split('@')[0]?.toLowerCase();
+            if (!toAddress || !alias) {
                 return;
             }
             const family = db
@@ -56,16 +77,23 @@ receiveRouter.post('/', webhookRateLimiter, express.raw({ type: 'application/jso
                 return;
             }
             const insertedEmailId = generateUuidBuffer();
-            db.prepare(`INSERT INTO ingested_emails (id, family_id, sender, subject, body_text, body_html, vendor_email_id, attachments_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(insertedEmailId, family.id, fetched.data.from, fetched.data.subject ?? '', fetched.data.text ?? '', fetched.data.html ?? '', emailId, JSON.stringify(fetched.data.attachments ?? []));
+            const insertResult = db.prepare(`INSERT INTO ingested_emails (id, family_id, sender, subject, body_text, body_html, vendor_email_id, attachments_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(vendor_email_id) DO NOTHING`).run(insertedEmailId, family.id, extractEmailAddress(readPayloadField(payload, 'from') ?? readPayloadField(payload, 'sender')) ?? 'unknown@unknown', extractString(readPayloadField(payload, 'subject')) ?? '', extractString(readPayloadField(payload, 'text') ?? readPayloadField(payload, 'body_text') ?? readPayloadField(payload, 'bodyText')) ?? '', extractString(readPayloadField(payload, 'html') ?? readPayloadField(payload, 'body_html') ?? readPayloadField(payload, 'bodyHtml')) ?? '', extractString(readPayloadField(payload, 'email_id') ?? readPayloadField(payload, 'emailId') ?? readPayloadField(payload, 'message_id')) ??
+                null, JSON.stringify(readPayloadField(payload, 'attachments') ?? []));
+            if (insertResult.changes === 0) {
+                return;
+            }
             const parseInput = {
                 recipient: toAddress,
-                subject: fetched.data.subject ?? '',
-                bodyText: fetched.data.text ?? '',
+                subject: extractString(readPayloadField(payload, 'subject')) ?? '',
+                bodyText: extractString(readPayloadField(payload, 'text') ?? readPayloadField(payload, 'body_text') ?? readPayloadField(payload, 'bodyText')) ?? '',
                 sourceEmailId: insertedEmailId
             };
-            if (fetched.data.html) {
-                Object.assign(parseInput, { bodyHtml: fetched.data.html });
+            const bodyHtml = extractString(readPayloadField(payload, 'html') ?? readPayloadField(payload, 'body_html') ?? readPayloadField(payload, 'bodyHtml')) ??
+                '';
+            if (bodyHtml) {
+                Object.assign(parseInput, { bodyHtml });
             }
             await parseEmailAndPersistEvents(parseInput);
         }
