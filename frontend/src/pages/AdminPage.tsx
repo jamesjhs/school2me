@@ -9,11 +9,16 @@ interface SmtpSettings {
   pass: string;
 }
 
+interface WebhookApiKeySettings {
+  apiKey: string;
+}
+
 export function AdminPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loggedIn, setLoggedIn] = useState(false);
   const [smtp, setSmtp] = useState<SmtpSettings>({ host: '', port: 587, user: '', pass: '' });
+  const [webhookApiKey, setWebhookApiKey] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,16 +40,20 @@ export function AdminPage() {
   useEffect(() => {
     if (!loggedIn) return;
 
-    const loadSmtp = async () => {
+    const loadSettings = async () => {
       try {
-        const payload = await apiGet<SmtpSettings>('/api/admin/settings/smtp');
-        setSmtp(payload);
+        const [smtpPayload, webhookPayload] = await Promise.all([
+          apiGet<SmtpSettings>('/api/admin/settings/smtp'),
+          apiGet<WebhookApiKeySettings>('/api/admin/settings/webhook-api-key')
+        ]);
+        setSmtp(smtpPayload);
+        setWebhookApiKey(webhookPayload.apiKey);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load SMTP');
+        setError(err instanceof Error ? err.message : 'Failed to load admin settings');
       }
     };
 
-    loadSmtp();
+    loadSettings();
   }, [loggedIn]);
 
   const submitLogin = async (event: FormEvent) => {
@@ -72,6 +81,18 @@ export function AdminPage() {
     }
   };
 
+  const saveWebhookApiKey = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    try {
+      await apiPut('/api/admin/settings/webhook-api-key', { apiKey: webhookApiKey });
+      setMessage('Webhook API key updated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save webhook API key');
+    }
+  };
+
   return (
     <main className="grid gap-4">
       <section className="rounded-3xl border-2 border-rose-200 bg-white p-5">
@@ -87,15 +108,24 @@ export function AdminPage() {
             </button>
           </form>
         ) : (
-          <form className="mt-4 grid gap-2" onSubmit={saveSmtp}>
-            <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP host" value={smtp.host} onChange={(event) => setSmtp((prev) => ({ ...prev, host: event.target.value }))} required />
-            <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP port" type="number" value={smtp.port} onChange={(event) => setSmtp((prev) => ({ ...prev, port: Number(event.target.value) }))} required />
-            <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP user" value={smtp.user} onChange={(event) => setSmtp((prev) => ({ ...prev, user: event.target.value }))} required />
-            <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP pass" type="password" value={smtp.pass} onChange={(event) => setSmtp((prev) => ({ ...prev, pass: event.target.value }))} required />
-            <button className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white" type="submit">
-              Save SMTP
-            </button>
-          </form>
+          <div className="mt-4 grid gap-4">
+            <form className="grid gap-2" onSubmit={saveSmtp}>
+              <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP host" value={smtp.host} onChange={(event) => setSmtp((prev) => ({ ...prev, host: event.target.value }))} required />
+              <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP port" type="number" value={smtp.port} onChange={(event) => setSmtp((prev) => ({ ...prev, port: Number(event.target.value) }))} required />
+              <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP user" value={smtp.user} onChange={(event) => setSmtp((prev) => ({ ...prev, user: event.target.value }))} required />
+              <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="SMTP pass" type="password" value={smtp.pass} onChange={(event) => setSmtp((prev) => ({ ...prev, pass: event.target.value }))} required />
+              <button className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white" type="submit">
+                Save SMTP
+              </button>
+            </form>
+
+            <form className="grid gap-2" onSubmit={saveWebhookApiKey}>
+              <input className="rounded-xl border border-slate-200 px-3 py-2" placeholder="Webhook API key" value={webhookApiKey} onChange={(event) => setWebhookApiKey(event.target.value)} required />
+              <button className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white" type="submit">
+                Save Webhook API Key
+              </button>
+            </form>
+          </div>
         )}
 
         {message && <p className="mt-3 text-sm text-emerald-700">{message}</p>}

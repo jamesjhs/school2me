@@ -1,6 +1,7 @@
 import argon2 from 'argon2';
 import crypto from 'node:crypto';
 import { Router } from 'express';
+import { env } from '../config/env.js';
 import { db } from '../database/db.js';
 import { requireAdminSession, requireUserSession } from '../middleware/auth.js';
 import { generateUuidBuffer, uuidBufferToString, uuidStringToBuffer } from '../utils/uuid.js';
@@ -159,6 +160,29 @@ adminRouter.put('/settings/smtp', (req, res) => {
   });
 
   tx();
+
+  res.json({ ok: true });
+});
+
+adminRouter.get('/settings/webhook-api-key', (_req, res) => {
+  const row = db
+    .prepare('SELECT value FROM app_settings WHERE key = ? LIMIT 1')
+    .get('webhook_api_key') as { value: string } | undefined;
+
+  res.json({ apiKey: row?.value ?? env.WEBHOOK_API_KEY });
+});
+
+adminRouter.put('/settings/webhook-api-key', (req, res) => {
+  const { apiKey } = req.body as { apiKey?: string };
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ error: 'apiKey is required' });
+  }
+
+  db.prepare(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`
+  ).run('webhook_api_key', apiKey.trim());
 
   res.json({ ok: true });
 });
