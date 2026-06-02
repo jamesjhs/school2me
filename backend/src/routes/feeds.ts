@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { createEvents } from 'ics';
+import { env } from '../config/env.js';
 import { db } from '../database/db.js';
 import { uuidBufferToString } from '../utils/uuid.js';
 
@@ -12,6 +13,14 @@ const xmlEscape = (value: string): string =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
+
+const toIcsDateTuple = (date: Date): [number, number, number, number, number] => [
+  date.getUTCFullYear(),
+  date.getUTCMonth() + 1,
+  date.getUTCDate(),
+  date.getUTCHours(),
+  date.getUTCMinutes()
+];
 
 feedsRouter.get('/:routing_alias/calendar.ics', (req, res) => {
   const family = db
@@ -48,8 +57,8 @@ feedsRouter.get('/:routing_alias/calendar.ics', (req, res) => {
         title: event.title,
         description: event.description ?? '',
         location: event.location ?? '',
-        start: [start.getUTCFullYear(), start.getUTCMonth() + 1, start.getUTCDate(), start.getUTCHours(), start.getUTCMinutes()],
-        end: [end.getUTCFullYear(), end.getUTCMonth() + 1, end.getUTCDate(), end.getUTCHours(), end.getUTCMinutes()]
+        start: toIcsDateTuple(start),
+        end: toIcsDateTuple(end)
       };
     })
   );
@@ -102,7 +111,7 @@ feedsRouter.get('/:routing_alias/rss', (req, res) => {
 <rss version="2.0">
 <channel>
 <title>School2Me Updates</title>
-<link>https://school2me.jahosi.co.uk/feeds/${xmlEscape(req.params.routing_alias)}/rss</link>
+<link>${xmlEscape(`${env.PUBLIC_BASE_URL}/feeds/${req.params.routing_alias}/rss`)}</link>
 <description>Family updates from the last 7 days</description>
 ${items}
 </channel>

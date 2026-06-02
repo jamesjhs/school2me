@@ -3,17 +3,30 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { env } from '../config/env.js';
 import { db } from '../database/db.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { sendMail } from '../services/email.js';
 import { verifyTurnstileToken } from '../services/turnstile.js';
 import { generateUuidBuffer, uuidBufferToString } from '../utils/uuid.js';
 import { requireUserSession } from '../middleware/auth.js';
 export const authRouter = Router();
 const SESSION_TTL_HOURS = 24 * 14;
+const authRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
+const strictAuthRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 8 });
 const hashValue = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const timingSafeEmailEquals = (input, expected) => {
     const one = crypto.createHash('sha256').update(input.toLowerCase().trim()).digest();
     const two = crypto.createHash('sha256').update(expected.toLowerCase().trim()).digest();
     return crypto.timingSafeEqual(one, two);
+};
+const setCsrfCookie = (res) => {
+    const csrfToken = crypto.randomBytes(24).toString('hex');
+    res.cookie('s2m_csrf', csrfToken, {
+        httpOnly: false,
+        secure: env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: SESSION_TTL_HOURS * 60 * 60 * 1000
+    });
+    return csrfToken;
 };
 const issueSession = (res, userId) => {
     const sessionId = generateUuidBuffer();
@@ -25,9 +38,14 @@ const issueSession = (res, userId) => {
         sameSite: 'strict',
         maxAge: SESSION_TTL_HOURS * 60 * 60 * 1000
     });
+    setCsrfCookie(res);
 };
 const findUserByEmail = (email) => db.prepare('SELECT id, email, role, family_id FROM users WHERE lower(email) = lower(?) LIMIT 1').get(email);
-authRouter.post('/magic-request', async (req, res) => {
+authRouter.get('/csrf', (_req, res) => {
+    const token = setCsrfCookie(res);
+    res.json({ csrfToken: token });
+});
+authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
     const { email, ['cf-turnstile-response']: turnstileToken } = req.body;
     if (!email || !turnstileToken) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -48,7 +66,7 @@ authRouter.post('/magic-request', async (req, res) => {
     });
     res.json({ ok: true });
 });
-authRouter.post('/magic-verify', (req, res) => {
+authRouter.post('/magic-verify', strictAuthRateLimiter, (req, res) => {
     const { token } = req.body;
     if (!token) {
         return res.status(400).json({ error: 'Missing token' });
@@ -76,7 +94,7 @@ authRouter.post('/magic-verify', (req, res) => {
         }
     });
 });
-authRouter.post('/email-2fa/request', async (req, res) => {
+authRouter.post('/email-2fa/request', strictAuthRateLimiter, async (req, res) => {
     const { email, ['cf-turnstile-response']: turnstileToken } = req.body;
     if (!email || !turnstileToken) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -96,7 +114,7 @@ authRouter.post('/email-2fa/request', async (req, res) => {
     });
     res.json({ ok: true });
 });
-authRouter.post('/email-2fa/verify', (req, res) => {
+authRouter.post('/email-2fa/verify', strictAuthRateLimiter, (req, res) => {
     const { email, code } = req.body;
     if (!email || !code) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -116,7 +134,7 @@ authRouter.post('/email-2fa/verify', (req, res) => {
     issueSession(res, user.id);
     return res.json({ ok: true });
 });
-authRouter.post('/join-share', async (req, res) => {
+authRouter.post('/join-share', strictAuthRateLimiter, async (req, res) => {
     const { email, shareName, sharePassword, ['cf-turnstile-response']: turnstileToken } = req.body;
     if (!email || !shareName || !sharePassword || !turnstileToken) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -147,7 +165,7 @@ authRouter.post('/join-share', async (req, res) => {
     issueSession(res, user.id);
     res.json({ ok: true });
 });
-authRouter.post('/join-link', async (req, res) => {
+authRouter.post('/join-link', strictAuthRateLimiter, async (req, res) => {
     const { email, token, ['cf-turnstile-response']: turnstileToken } = req.body;
     if (!email || !token || !turnstileToken) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -177,7 +195,7 @@ authRouter.post('/join-link', async (req, res) => {
 authRouter.get('/session', requireUserSession, (req, res) => {
     res.json({ user: req.user });
 });
-authRouter.post('/logout', requireUserSession, (req, res) => {
+authRouter.post('/logout', authRateLimiter, requireUserSession, (req, res) => {
     const sessionToken = req.cookies['s2m_session'];
     if (sessionToken) {
         db.prepare('DELETE FROM user_sessions WHERE hex(id) = upper(?)').run(sessionToken);
@@ -186,7 +204,7 @@ authRouter.post('/logout', requireUserSession, (req, res) => {
     res.json({ ok: true });
 });
 export const adminAuthRouter = Router();
-adminAuthRouter.post('/login', async (req, res) => {
+adminAuthRouter.post('/login', strictAuthRateLimiter, async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
         return res.status(400).json({ error: 'Missing credentials' });
@@ -205,6 +223,7 @@ adminAuthRouter.post('/login', async (req, res) => {
         sameSite: 'strict',
         maxAge: SESSION_TTL_HOURS * 60 * 60 * 1000
     });
+    setCsrfCookie(res);
     return res.json({ ok: true });
 });
 adminAuthRouter.post('/logout', (req, res) => {

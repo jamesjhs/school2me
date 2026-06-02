@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 export const db = new Database(env.DB_PATH);
 
 db.pragma("cipher='sqlcipher'");
+// Safe because DB_ENCRYPTION_KEY is strictly validated as 64-char hex in env schema.
 db.pragma(`key='${env.DB_ENCRYPTION_KEY}'`);
 db.pragma('foreign_keys=ON');
 db.pragma('journal_mode=WAL');

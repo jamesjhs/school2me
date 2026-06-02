@@ -2,10 +2,12 @@ import express from 'express';
 import { Resend } from 'resend';
 import { env } from '../config/env.js';
 import { db } from '../database/db.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { parseEmailAndPersistEvents } from '../services/openaiParser.js';
 import { generateUuidBuffer } from '../utils/uuid.js';
 
 const resend = new Resend(env.RESEND_API_KEY);
+const webhookRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120 });
 
 export const receiveRouter = express.Router();
 
@@ -18,7 +20,7 @@ const extractEmailId = (verifiedPayload: any): string | undefined => {
   );
 };
 
-receiveRouter.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
+receiveRouter.post('/', webhookRateLimiter, express.raw({ type: 'application/json' }), async (req, res) => {
   const id = req.header('svix-id');
   const timestamp = req.header('svix-timestamp');
   const signature = req.header('svix-signature');
