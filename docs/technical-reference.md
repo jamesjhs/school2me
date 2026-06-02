@@ -4,10 +4,10 @@
 
 School2Me is a two-part application:
 
-- **Backend** (`/tmp/workspace/jamesjhs/school2me/backend`): Express + TypeScript API, SQLCipher-encrypted SQLite, email ingestion/parsing, auth/session management, and feed generation.
-- **Frontend** (`/tmp/workspace/jamesjhs/school2me/frontend`): React + TypeScript + Vite progressive web app for authentication, timeline views, family settings, and admin controls.
+- **Backend** (`backend/`): Express + TypeScript API, SQLCipher-encrypted SQLite, email ingestion/parsing, auth/session management, and feed generation.
+- **Frontend** (`frontend/`): React + TypeScript + Vite progressive web app for authentication, timeline views, family settings, and admin controls.
 
-The repository uses npm workspaces from `/tmp/workspace/jamesjhs/school2me/package.json`.
+The repository uses npm workspaces from `package.json`.
 
 ## 2. Runtime Dependencies and Roles
 
@@ -31,7 +31,7 @@ The repository uses npm workspaces from `/tmp/workspace/jamesjhs/school2me/packa
 
 ## 3. Configuration Surface
 
-Backend configuration is validated in `/tmp/workspace/jamesjhs/school2me/backend/src/config/env.ts`.
+Backend configuration is validated in `backend/src/config/env.ts`.
 
 Required variables:
 
@@ -56,7 +56,7 @@ Frontend environment:
 
 ## 4. Data Model and Resource Map
 
-Defined in `/tmp/workspace/jamesjhs/school2me/backend/src/database/db.ts`.
+Defined in `backend/src/database/db.ts`.
 
 ### Core entities
 
@@ -81,7 +81,7 @@ Defined in `/tmp/workspace/jamesjhs/school2me/backend/src/database/db.ts`.
 
 ## 5. Backend Execution Flow
 
-Entry point: `/tmp/workspace/jamesjhs/school2me/backend/src/server.ts`.
+Entry point: `backend/src/server.ts`.
 
 1. Environment is loaded and validated.
 2. Database opens, SQLCipher key applied, schema ensured.
@@ -163,7 +163,7 @@ Entry point: `/tmp/workspace/jamesjhs/school2me/backend/src/server.ts`.
 
 ## 9. Frontend Resource and Feature Map
 
-Router entry: `/tmp/workspace/jamesjhs/school2me/frontend/src/App.tsx`.
+Router entry: `frontend/src/App.tsx`.
 
 - `/auth` → `AuthPage` (magic link, email 2FA, join via share name/password, join via link token)
 - `/dashboard` → `DashboardPage` (timeline grouping and child/activity filtering)
@@ -178,8 +178,8 @@ Shared API client:
 
 PWA resources:
 
-- `/tmp/workspace/jamesjhs/school2me/frontend/public/manifest.json`
-- `/tmp/workspace/jamesjhs/school2me/frontend/src/serviceWorker.ts`
+- `frontend/public/manifest.json`
+- `frontend/src/serviceWorker.ts`
 
 ## 10. Function-Level Backend Reference
 
@@ -247,7 +247,7 @@ PWA resources:
 
 ## 11. Build/Test/Lint Commands
 
-From `/tmp/workspace/jamesjhs/school2me`:
+From repository root:
 
 - `npm run lint` → backend + frontend lint
 - `npm run build` → backend TS compile + frontend production build

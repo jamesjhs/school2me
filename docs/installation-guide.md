@@ -14,7 +14,7 @@ This guide installs School2Me for development or self-hosted deployment.
 ## 2) Clone and install dependencies
 
 ```bash
-cd /tmp/workspace/jamesjhs/school2me
+cd <repository-root>
 npm ci
 ```
 
@@ -23,7 +23,7 @@ npm ci
 Copy and edit backend environment variables:
 
 ```bash
-cp /tmp/workspace/jamesjhs/school2me/backend/.env.example /tmp/workspace/jamesjhs/school2me/backend/.env
+cp backend/.env.example backend/.env
 ```
 
 Set at minimum:
@@ -45,7 +45,7 @@ Set at minimum:
 Run from backend:
 
 ```bash
-cd /tmp/workspace/jamesjhs/school2me/backend
+cd <repository-root>/backend
 node -e "import('argon2').then(async a=>{console.log(await a.default.hash(process.argv[1]));})" "your-admin-password"
 ```
 
@@ -56,7 +56,7 @@ Copy output into `ADMIN_PASSWORD_HASH`.
 Copy and edit frontend environment variables:
 
 ```bash
-cp /tmp/workspace/jamesjhs/school2me/frontend/.env.example /tmp/workspace/jamesjhs/school2me/frontend/.env
+cp frontend/.env.example frontend/.env
 ```
 
 Set:
@@ -69,7 +69,7 @@ Set:
 From repository root:
 
 ```bash
-cd /tmp/workspace/jamesjhs/school2me
+cd <repository-root>
 npm run lint
 npm run build
 npm test
@@ -82,14 +82,14 @@ Open two terminals:
 ### Terminal A (backend)
 
 ```bash
-cd /tmp/workspace/jamesjhs/school2me
+cd <repository-root>
 npm run dev:backend
 ```
 
 ### Terminal B (frontend)
 
 ```bash
-cd /tmp/workspace/jamesjhs/school2me
+cd <repository-root>
 npm run dev:frontend
 ```
 
@@ -101,15 +101,15 @@ Default endpoints:
 ## 7) Production build and run
 
 ```bash
-cd /tmp/workspace/jamesjhs/school2me
+cd <repository-root>
 npm run build
-cd /tmp/workspace/jamesjhs/school2me/backend
+cd backend
 npm run start
 ```
 
 Serve frontend static files from:
 
-- `/tmp/workspace/jamesjhs/school2me/frontend/dist`
+- `<repository-root>/frontend/dist`
 
 Ensure reverse proxy routes:
 
