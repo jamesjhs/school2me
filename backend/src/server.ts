@@ -160,7 +160,7 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   });
 
   if (res.headersSent) {
-    return;
+    return _next(error);
   }
 
   res.status(500).json({

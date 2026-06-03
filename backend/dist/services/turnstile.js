@@ -18,12 +18,27 @@ export const verifyTurnstileToken = async (token, remoteIp) => {
             body: form
         });
         if (!response.ok) {
+            console.warn('Turnstile verification returned non-OK response', {
+                status: response.status,
+                statusText: response.statusText,
+                remoteIp: remoteIp ?? null
+            });
             return false;
         }
         const data = (await response.json());
+        if (data.success !== true) {
+            console.warn('Turnstile verification rejected token', {
+                remoteIp: remoteIp ?? null,
+                errorCodes: data['error-codes'] ?? []
+            });
+        }
         return data.success === true;
     }
-    catch {
+    catch (error) {
+        console.error('Turnstile verification request failed', {
+            remoteIp: remoteIp ?? null,
+            message: error instanceof Error ? error.message : String(error)
+        });
         return false;
     }
 };
