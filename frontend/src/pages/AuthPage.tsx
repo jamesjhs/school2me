@@ -138,7 +138,7 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<v
       )}
 
       {loading && <p className="mt-3 text-sm text-slate-500">Submitting…</p>}
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-3 whitespace-pre-line break-words text-sm text-red-600">{error}</p>}
       {message && <p className="mt-3 text-sm text-emerald-700">{message}</p>}
     </main>
   );
