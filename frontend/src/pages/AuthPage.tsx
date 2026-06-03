@@ -1,238 +1,159 @@
 import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiPost } from '../api/client';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 import { useAsyncState } from '../hooks/useAsyncState';
 
-type AuthMode = 'magic' | 'email2fa' | 'joinShare' | 'joinLink';
+type LoginMethod = 'password' | 'magic';
+type LoginRole = 'user' | 'admin';
 
 const turnstileSiteKey = import.meta.env.VITE_CF_TURNSTILE_SITE_KEY ?? '';
 
-export function AuthPage() {
-  const [mode, setMode] = useState<AuthMode>('magic');
+export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
+  const navigate = useNavigate();
+  const [method, setMethod] = useState<LoginMethod>('password');
+  const [role, setRole] = useState<LoginRole>('user');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [token, setToken] = useState(new URLSearchParams(window.location.search).get('magicToken') ?? '');
-  const [code, setCode] = useState('');
-  const [shareName, setShareName] = useState('');
-  const [sharePassword, setSharePassword] = useState('');
-  const [shareLinkToken, setShareLinkToken] = useState('');
-  const [turnstileResponse, setTurnstileResponse] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const { loading, error, run } = useAsyncState();
 
-  const title = useMemo(() => {
-    switch (mode) {
-      case 'magic':
-        return 'Magic Link Login';
-      case 'email2fa':
-        return 'Email 2FA Login';
-      case 'joinShare':
-        return 'Join Family via Share Name';
-      default:
-        return 'Join Family via Share Link';
+  const title = useMemo(() => `${role === 'admin' ? 'Administrator' : 'User'} Login`, [role]);
+
+  const resetTurnstile = () => setTurnstileResetSignal((value) => value + 1);
+
+  const submitPassword = async (event: FormEvent) => {
+    event.preventDefault();
+    setMessage(null);
+
+    const result = await run(() =>
+      apiPost<{ ok: boolean; destination: string }>('/api/auth/password-login', {
+        email,
+        password,
+        role,
+        'cf-turnstile-response': turnstileToken
+      })
+    );
+
+    if (!result?.ok) {
+      resetTurnstile();
+      return;
     }
-  }, [mode]);
+
+    await onAuthenticated();
+    navigate(result.destination, { replace: true });
+  };
 
   const requestMagic = async (event: FormEvent) => {
     event.preventDefault();
-    const result = await run(() => apiPost<{ ok: boolean }>('/api/auth/magic-request', {
-      email,
-      'cf-turnstile-response': turnstileResponse
-    }));
+    setMessage(null);
+
+    const result = await run(() =>
+      apiPost<{ ok: boolean }>('/api/auth/magic-request', {
+        email,
+        role,
+        'cf-turnstile-response': turnstileToken
+      })
+    );
 
     if (result?.ok) {
       setMessage('Magic link sent to your inbox.');
+      resetTurnstile();
     }
   };
 
   const verifyMagic = async (event: FormEvent) => {
     event.preventDefault();
-    const result = await run(() => apiPost<{ ok: boolean }>('/api/auth/magic-verify', { token }));
-    if (result?.ok) {
-      setMessage('Logged in via magic link.');
+    setMessage(null);
+
+    const result = await run(() =>
+      apiPost<{ ok: boolean; destination: string }>('/api/auth/magic-verify', {
+        token
+      })
+    );
+
+    if (!result?.ok) {
+      return;
     }
-  };
 
-  const request2fa = async (event: FormEvent) => {
-    event.preventDefault();
-    const result = await run(() => apiPost<{ ok: boolean }>('/api/auth/email-2fa/request', {
-      email,
-      'cf-turnstile-response': turnstileResponse
-    }));
-
-    if (result?.ok) {
-      setMessage('2FA code sent to email.');
-    }
-  };
-
-  const verify2fa = async (event: FormEvent) => {
-    event.preventDefault();
-    const result = await run(() => apiPost<{ ok: boolean }>('/api/auth/email-2fa/verify', { email, code }));
-    if (result?.ok) {
-      setMessage('Logged in via email 2FA.');
-    }
-  };
-
-  const submitJoinShare = async (event: FormEvent) => {
-    event.preventDefault();
-    const result = await run(() => apiPost<{ ok: boolean }>('/api/auth/join-share', {
-      email,
-      shareName,
-      sharePassword,
-      'cf-turnstile-response': turnstileResponse
-    }));
-
-    if (result?.ok) {
-      setMessage('Joined family successfully.');
-    }
-  };
-
-  const submitJoinLink = async (event: FormEvent) => {
-    event.preventDefault();
-    const result = await run(() => apiPost<{ ok: boolean }>('/api/auth/join-link', {
-      email,
-      token: shareLinkToken,
-      'cf-turnstile-response': turnstileResponse
-    }));
-
-    if (result?.ok) {
-      setMessage('Joined family via link token.');
-    }
+    await onAuthenticated();
+    navigate(result.destination, { replace: true });
   };
 
   return (
-    <main className="grid gap-4 md:grid-cols-[240px_1fr]">
-      <aside className="rounded-3xl border-2 border-rose-200 bg-white p-4">
-        <h2 className="mb-3 text-lg font-semibold">Auth Modes</h2>
-        <div className="flex flex-col gap-2">
-          {([
-            ['magic', 'Magic Link'],
-            ['email2fa', 'Email 2FA'],
-            ['joinShare', 'Join (Share Name + Password)'],
-            ['joinLink', 'Join (Share Link/QR Token)']
-          ] as Array<[AuthMode, string]>).map(([id, label]) => (
-            <button
-              key={id}
-              className={`rounded-2xl border px-3 py-2 text-left ${mode === id ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}
-              onClick={() => setMode(id)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </aside>
+    <main className="mx-auto max-w-2xl rounded-3xl border-2 border-rose-200 bg-white p-6">
+      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <p className="mt-1 text-sm text-slate-600">Login with email and password, or email 2FA magic link.</p>
 
-      <section className="rounded-3xl border-2 border-rose-200 bg-white p-5">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        <p className="mt-1 text-sm text-slate-600">Mobile-first passwordless access with bot protection.</p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <label className="grid gap-1 text-sm">
+          Login as
+          <select className="rounded-xl border border-slate-200 px-3 py-2" value={role} onChange={(event) => setRole(event.target.value as LoginRole)}>
+            <option value="user">User</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </label>
 
-        <div className="mt-4 rounded-2xl border border-dashed border-rose-300 bg-rose-50 p-3 text-sm">
-          <div className="font-medium">Cloudflare Turnstile Container</div>
-          <div className="text-slate-600">Site key: {turnstileSiteKey || '(set VITE_CF_TURNSTILE_SITE_KEY)'}</div>
+        <label className="grid gap-1 text-sm">
+          Method
+          <select className="rounded-xl border border-slate-200 px-3 py-2" value={method} onChange={(event) => setMethod(event.target.value as LoginMethod)}>
+            <option value="password">Password</option>
+            <option value="magic">2FA via magic link</option>
+          </select>
+        </label>
+      </div>
+
+      <form className="mt-4 grid gap-3" onSubmit={method === 'password' ? submitPassword : requestMagic}>
+        <label className="grid gap-1 text-sm">
+          Email
           <input
-            placeholder="Paste cf-turnstile-response token"
-            className="mt-2 w-full rounded-xl border border-rose-200 px-3 py-2"
-            value={turnstileResponse}
-            onChange={(event) => setTurnstileResponse(event.target.value)}
+            type="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            className="rounded-xl border border-slate-200 px-3 py-2"
           />
-        </div>
+        </label>
 
-        <form className="mt-4 grid gap-3" onSubmit={mode === 'magic' ? requestMagic : mode === 'email2fa' ? request2fa : mode === 'joinShare' ? submitJoinShare : submitJoinLink}>
+        {method === 'password' && (
           <label className="grid gap-1 text-sm">
-            Email
+            Password
             <input
-              type="email"
+              type="password"
               required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2"
             />
           </label>
+        )}
 
-          {mode === 'magic' && (
-            <>
-              <button type="submit" className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white">
-                Request Magic Link
-              </button>
-              <label className="grid gap-1 text-sm">
-                Magic Token
-                <input
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2"
-                />
-              </label>
-              <button type="button" className="rounded-2xl border border-rose-300 px-4 py-2" onClick={verifyMagic}>
-                Verify Magic Token
-              </button>
-            </>
-          )}
+        <TurnstileWidget siteKey={turnstileSiteKey} resetSignal={turnstileResetSignal} onTokenChange={setTurnstileToken} />
 
-          {mode === 'email2fa' && (
-            <>
-              <button type="submit" className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white">
-                Request Email Code
-              </button>
-              <label className="grid gap-1 text-sm">
-                2FA Code
-                <input
-                  value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2"
-                />
-              </label>
-              <button type="button" className="rounded-2xl border border-rose-300 px-4 py-2" onClick={verify2fa}>
-                Verify Code
-              </button>
-            </>
-          )}
+        <button type="submit" className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white" disabled={loading || !turnstileToken}>
+          {method === 'password' ? 'Login with Password' : 'Send Magic Link'}
+        </button>
+      </form>
 
-          {mode === 'joinShare' && (
-            <>
-              <label className="grid gap-1 text-sm">
-                Share Name
-                <input
-                  value={shareName}
-                  onChange={(event) => setShareName(event.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2"
-                />
-              </label>
-              <label className="grid gap-1 text-sm">
-                Share Password
-                <input
-                  type="password"
-                  value={sharePassword}
-                  onChange={(event) => setSharePassword(event.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2"
-                />
-              </label>
-              <button type="submit" className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white">
-                Join Family
-              </button>
-            </>
-          )}
-
-          {mode === 'joinLink' && (
-            <>
-              <label className="grid gap-1 text-sm">
-                Share Link Token (from link/QR)
-                <input
-                  value={shareLinkToken}
-                  onChange={(event) => setShareLinkToken(event.target.value)}
-                  className="rounded-xl border border-slate-200 px-3 py-2"
-                />
-              </label>
-              <button type="submit" className="rounded-2xl bg-rose-500 px-4 py-2 font-medium text-white">
-                Join via Link Token
-              </button>
-            </>
-          )}
-
-          {loading && <p className="text-sm text-slate-500">Submitting…</p>}
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {message && <p className="text-sm text-emerald-700">{message}</p>}
+      {method === 'magic' && (
+        <form className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" onSubmit={verifyMagic}>
+          <label className="grid gap-1 text-sm">
+            Magic Token
+            <input value={token} onChange={(event) => setToken(event.target.value)} className="rounded-xl border border-slate-200 px-3 py-2" required />
+          </label>
+          <button type="submit" className="rounded-2xl border border-rose-300 px-4 py-2">
+            Verify Magic Token
+          </button>
         </form>
-      </section>
+      )}
+
+      {loading && <p className="mt-3 text-sm text-slate-500">Submitting…</p>}
+      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      {message && <p className="mt-3 text-sm text-emerald-700">{message}</p>}
     </main>
   );
 }

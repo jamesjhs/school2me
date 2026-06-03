@@ -22,6 +22,7 @@ app.use(express.json({ limit: '2mb' }));
 
 const csrfExemptPaths = new Set([
   '/api/auth/csrf',
+  '/api/auth/password-login',
   '/api/auth/magic-request',
   '/api/auth/magic-verify',
   '/api/auth/email-2fa/request',

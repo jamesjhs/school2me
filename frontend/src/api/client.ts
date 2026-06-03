@@ -68,3 +68,15 @@ export const apiPut = async <T>(path: string, body: unknown): Promise<T> => {
   });
   return handleResponse<T>(response);
 };
+
+export const apiDelete = async <T>(path: string): Promise<T> => {
+  const token = await ensureCsrfToken();
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: {
+      'x-csrf-token': token
+    },
+    credentials: 'include'
+  });
+  return handleResponse<T>(response);
+};

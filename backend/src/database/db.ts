@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
   id BLOB PRIMARY KEY,
   family_id BLOB NOT NULL,
   email TEXT NOT NULL UNIQUE,
+  password_hash TEXT,
   role TEXT NOT NULL CHECK (role IN ('admin','member')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE
@@ -131,3 +132,8 @@ CREATE INDEX IF NOT EXISTS idx_email_2fa_codes_email ON email_2fa_codes(email, e
 `;
 
 db.exec(schema);
+
+const userColumns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+if (!userColumns.some((column) => column.name === 'password_hash')) {
+  db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
+}

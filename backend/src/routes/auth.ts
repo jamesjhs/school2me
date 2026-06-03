@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import { db } from '../database/db.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { sendMail } from '../services/email.js';
+import { getAdminEmail } from '../services/adminIdentity.js';
 import { verifyTurnstileToken } from '../services/turnstile.js';
 import { generateUuidBuffer, uuidBufferToString } from '../utils/uuid.js';
 import { requireUserSession } from '../middleware/auth.js';
@@ -15,12 +16,16 @@ const SESSION_TTL_HOURS = 24 * 14;
 const authRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 const strictAuthRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 8 });
 
+type LoginRole = 'user' | 'admin';
+
 const hashValue = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const timingSafeEmailEquals = (input: string, expected: string) => {
   const one = crypto.createHash('sha256').update(input.toLowerCase().trim()).digest();
   const two = crypto.createHash('sha256').update(expected.toLowerCase().trim()).digest();
   return crypto.timingSafeEqual(one, two);
 };
+
+const normalizeLoginRole = (role: unknown): LoginRole => (role === 'admin' ? 'admin' : 'user');
 
 const setCsrfCookie = (res: any): string => {
   const csrfToken = crypto.randomBytes(24).toString('hex');
@@ -49,19 +54,105 @@ const issueSession = (res: any, userId: Buffer) => {
   setCsrfCookie(res);
 };
 
+const issueAdminSession = (res: any) => {
+  const adminSessionId = generateUuidBuffer();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO admin_sessions (id, expires_at) VALUES (?, ?)').run(adminSessionId, expiresAt);
+
+  res.cookie('s2m_admin_session', adminSessionId.toString('hex').toUpperCase(), {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: SESSION_TTL_HOURS * 60 * 60 * 1000
+  });
+
+  setCsrfCookie(res);
+};
+
 const findUserByEmail = (email: string) =>
-  db.prepare('SELECT id, email, role, family_id FROM users WHERE lower(email) = lower(?) LIMIT 1').get(email) as
-    | { id: Buffer; email: string; role: 'admin' | 'member'; family_id: Buffer }
+  db
+    .prepare('SELECT id, email, password_hash, role, family_id FROM users WHERE lower(email) = lower(?) LIMIT 1')
+    .get(email) as
+    | { id: Buffer; email: string; password_hash: string | null; role: 'admin' | 'member'; family_id: Buffer }
     | undefined;
+
+const requireTurnstile = async (token: string | undefined, ip: string | undefined, res: any): Promise<boolean> => {
+  if (!token) {
+    res.status(400).json({ error: 'Missing required fields' });
+    return false;
+  }
+
+  const turnstileOk = await verifyTurnstileToken(token, ip);
+  if (!turnstileOk) {
+    res.status(400).json({ error: 'Turnstile validation failed' });
+    return false;
+  }
+
+  return true;
+};
 
 authRouter.get('/csrf', (_req, res) => {
   const token = setCsrfCookie(res);
   res.json({ csrfToken: token });
 });
 
-authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
-  const { email, ['cf-turnstile-response']: turnstileToken } = req.body as {
+authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
+  const { email, password, role, ['cf-turnstile-response']: turnstileToken } = req.body as {
     email?: string;
+    password?: string;
+    role?: LoginRole;
+    'cf-turnstile-response'?: string;
+  };
+
+  if (!email || !password || !turnstileToken) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
+    return;
+  }
+
+  const loginRole = normalizeLoginRole(role);
+  if (loginRole === 'admin') {
+    const emailValid = timingSafeEmailEquals(email, getAdminEmail());
+    const passwordValid = await argon2.verify(env.ADMIN_PASSWORD_HASH, password);
+
+    if (!emailValid || !passwordValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    issueAdminSession(res);
+    return res.json({ ok: true, role: 'admin', destination: '/admin' });
+  }
+
+  const user = findUserByEmail(email.trim().toLowerCase());
+  if (!user || !user.password_hash) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  const passwordValid = await argon2.verify(user.password_hash, password);
+  if (!passwordValid) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  issueSession(res, user.id);
+  return res.json({
+    ok: true,
+    role: user.role,
+    destination: user.role === 'admin' ? '/admin' : '/dashboard',
+    user: {
+      id: uuidBufferToString(user.id),
+      email: user.email,
+      role: user.role,
+      familyId: uuidBufferToString(user.family_id)
+    }
+  });
+});
+
+authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
+  const { email, role, ['cf-turnstile-response']: turnstileToken } = req.body as {
+    email?: string;
+    role?: LoginRole;
     'cf-turnstile-response'?: string;
   };
 
@@ -69,11 +160,11 @@ authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const turnstileOk = await verifyTurnstileToken(turnstileToken, req.ip);
-  if (!turnstileOk) {
-    return res.status(400).json({ error: 'Turnstile validation failed' });
+  if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
+    return;
   }
 
+  const loginRole = normalizeLoginRole(role);
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = hashValue(token);
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
@@ -85,7 +176,7 @@ authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
     expiresAt
   );
 
-  const loginUrl = `${env.FRONTEND_BASE_URL}/auth?magicToken=${token}`;
+  const loginUrl = `${env.FRONTEND_BASE_URL}/auth?magicToken=${token}&role=${loginRole}`;
   await sendMail({
     to: email,
     subject: 'Your School2Me Magic Link',
@@ -112,6 +203,11 @@ authRouter.post('/magic-verify', strictAuthRateLimiter, (req, res) => {
 
   db.prepare("UPDATE magic_links SET used_at = datetime('now') WHERE id = ?").run(link.id);
 
+  if (timingSafeEmailEquals(link.email, getAdminEmail())) {
+    issueAdminSession(res);
+    return res.json({ ok: true, role: 'admin', destination: '/admin' });
+  }
+
   const user = findUserByEmail(link.email);
   if (!user) {
     return res.status(404).json({ error: 'No account for this email. Join a family first.' });
@@ -121,6 +217,8 @@ authRouter.post('/magic-verify', strictAuthRateLimiter, (req, res) => {
 
   return res.json({
     ok: true,
+    role: user.role,
+    destination: user.role === 'admin' ? '/admin' : '/dashboard',
     user: {
       id: uuidBufferToString(user.id),
       email: user.email,
@@ -140,9 +238,8 @@ authRouter.post('/email-2fa/request', strictAuthRateLimiter, async (req, res) =>
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const turnstileOk = await verifyTurnstileToken(turnstileToken, req.ip);
-  if (!turnstileOk) {
-    return res.status(400).json({ error: 'Turnstile validation failed' });
+  if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
+    return;
   }
 
   const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -206,9 +303,8 @@ authRouter.post('/join-share', strictAuthRateLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const turnstileOk = await verifyTurnstileToken(turnstileToken, req.ip);
-  if (!turnstileOk) {
-    return res.status(400).json({ error: 'Turnstile validation failed' });
+  if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
+    return;
   }
 
   const invite = db
@@ -255,9 +351,8 @@ authRouter.post('/join-link', strictAuthRateLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const turnstileOk = await verifyTurnstileToken(turnstileToken, req.ip);
-  if (!turnstileOk) {
-    return res.status(400).json({ error: 'Turnstile validation failed' });
+  if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
+    return;
   }
 
   const invite = db
@@ -307,33 +402,30 @@ authRouter.post('/logout', authRateLimiter, requireUserSession, (req, res) => {
 export const adminAuthRouter = Router();
 
 adminAuthRouter.post('/login', strictAuthRateLimiter, async (req, res) => {
-  const { email, password } = req.body as { email?: string; password?: string };
+  const { email, password, ['cf-turnstile-response']: turnstileToken } = req.body as {
+    email?: string;
+    password?: string;
+    'cf-turnstile-response'?: string;
+  };
 
-  if (!email || !password) {
+  if (!email || !password || !turnstileToken) {
     return res.status(400).json({ error: 'Missing credentials' });
   }
 
-  const emailValid = timingSafeEmailEquals(email, env.ADMIN_EMAIL);
+  if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
+    return;
+  }
+
+  const emailValid = timingSafeEmailEquals(email, getAdminEmail());
   const passwordValid = await argon2.verify(env.ADMIN_PASSWORD_HASH, password);
 
   if (!emailValid || !passwordValid) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
-  const adminSessionId = generateUuidBuffer();
-  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000).toISOString();
-  db.prepare('INSERT INTO admin_sessions (id, expires_at) VALUES (?, ?)').run(adminSessionId, expiresAt);
+  issueAdminSession(res);
 
-  res.cookie('s2m_admin_session', adminSessionId.toString('hex').toUpperCase(), {
-    httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: SESSION_TTL_HOURS * 60 * 60 * 1000
-  });
-
-  setCsrfCookie(res);
-
-  return res.json({ ok: true });
+  return res.json({ ok: true, role: 'admin', destination: '/admin' });
 });
 
 adminAuthRouter.post('/logout', (req, res) => {
@@ -346,8 +438,8 @@ adminAuthRouter.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-adminAuthRouter.get('/me', (req, res) => {
-  const adminSession = req.cookies['s2m_admin_session'];
+adminAuthRouter.get('/me', (_req, res) => {
+  const adminSession = _req.cookies['s2m_admin_session'];
   if (!adminSession) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -360,5 +452,5 @@ adminAuthRouter.get('/me', (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  return res.json({ email: env.ADMIN_EMAIL });
+  return res.json({ email: getAdminEmail() });
 });

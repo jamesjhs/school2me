@@ -7,6 +7,7 @@ This guide installs School2Me for development or self-hosted deployment.
 - Node.js 20+ and npm 10+
 - A writable absolute path for the encrypted SQLite database file
 - Cloudflare Turnstile site/secret keys
+- Cloudflare Turnstile security settings must allow your frontend domain (and localhost for development)
 - SMTP credentials for outbound email
 - OpenAI API key
 - Admin password hash (Argon2)
@@ -33,6 +34,7 @@ Set at minimum:
 - `DB_PATH` (absolute DB file path)
 - `DB_ENCRYPTION_KEY` (64 hex characters)
 - `CF_TURNSTILE_SITE_KEY`, `CF_TURNSTILE_SECRET_KEY`
+- In Turnstile dashboard, add your app domains to allowed hostnames
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`
 - `WEBHOOK_API_KEY`
@@ -132,9 +134,9 @@ Payload should include common fields (to/recipient, from/sender, subject, text/h
 ## 9) Post-install smoke checks
 
 1. `GET /api/health` returns `{ ok: true, ... }`
-2. `/auth` loads and can request magic link / 2FA
-3. `/admin` login works with configured admin credentials
-4. `/settings` can create child and activity
+2. `/auth` loads and supports password login or magic-link 2FA for user/admin
+3. `/dashboard` shows user sections (children, activities, invites, inbox, feeds)
+4. `/admin` shows account/email/webhook/system tabs
 5. `/api/settings/invites` generates share link token
 6. `POST /receive` ingests test payload and creates dashboard events
 7. Public feeds resolve:
