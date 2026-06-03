@@ -19,15 +19,6 @@ const timingSafeEmailEquals = (input, expected) => {
     const two = crypto.createHash('sha256').update(expected.toLowerCase().trim()).digest();
     return crypto.timingSafeEqual(one, two);
 };
-const parseLoginRole = (role) => {
-    if (role === 'admin' || role === 'user') {
-        return role;
-    }
-    if (role == null) {
-        return 'user';
-    }
-    return null;
-};
 const setCsrfCookie = (res) => {
     const csrfToken = crypto.randomBytes(24).toString('hex');
     res.cookie('s2m_csrf', csrfToken, {
@@ -82,27 +73,24 @@ authRouter.get('/csrf', (_req, res) => {
     res.json({ csrfToken: token });
 });
 authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
-    const { email, password, role, ['cf-turnstile-response']: turnstileToken } = req.body;
+    const { email, password, ['cf-turnstile-response']: turnstileToken } = req.body;
     if (!email || !password || !turnstileToken) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
     if (!(await requireTurnstile(turnstileToken, req.ip, res))) {
         return;
     }
-    const loginRole = parseLoginRole(role);
-    if (!loginRole) {
-        return res.status(400).json({ error: 'Invalid login role' });
-    }
-    if (loginRole === 'admin') {
-        const emailValid = timingSafeEmailEquals(email, getAdminEmail());
+    const normalizedEmail = email.trim().toLowerCase();
+    const isAdminEmail = timingSafeEmailEquals(normalizedEmail, getAdminEmail());
+    if (isAdminEmail) {
         const passwordValid = await argon2.verify(env.ADMIN_PASSWORD_HASH, password);
-        if (!emailValid || !passwordValid) {
+        if (!passwordValid) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         issueAdminSession(res);
         return res.json({ ok: true, role: 'admin', destination: '/admin' });
     }
-    const user = findUserByEmail(email.trim().toLowerCase());
+    const user = findUserByEmail(normalizedEmail);
     if (!user || !user.password_hash) {
         return res.status(401).json({ error: 'Invalid credentials' });
     }

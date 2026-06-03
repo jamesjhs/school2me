@@ -113,8 +113,7 @@ after(() => {
 test('password login rejects missing turnstile token', { concurrency: false }, async () => {
   const response = await requestJson('/api/auth/password-login', {
     email: 'member@example.com',
-    password: 'user-password',
-    role: 'user'
+    password: 'user-password'
   });
 
   assert.equal(response.status, 400);
@@ -127,7 +126,6 @@ test('password login rejects invalid turnstile token', { concurrency: false }, a
   const response = await requestJson('/api/auth/password-login', {
     email: 'member@example.com',
     password: 'user-password',
-    role: 'user',
     'cf-turnstile-response': 'invalid-token'
   });
 
@@ -143,7 +141,6 @@ test('password login handles turnstile verifier failure', { concurrency: false }
   const response = await requestJson('/api/auth/password-login', {
     email: 'member@example.com',
     password: 'user-password',
-    role: 'user',
     'cf-turnstile-response': 'token'
   });
 
@@ -157,11 +154,25 @@ test('password login succeeds with valid turnstile token', { concurrency: false 
   const response = await requestJson('/api/auth/password-login', {
     email: 'member@example.com',
     password: 'user-password',
-    role: 'user',
     'cf-turnstile-response': 'valid-token'
   });
 
   assert.equal(response.status, 200);
   assert.equal(response.body.ok, true);
   assert.equal(response.body.destination, '/dashboard');
+});
+
+test('password login infers admin account from email', { concurrency: false }, async () => {
+  fetchImpl = async () => ({ ok: true, json: async () => ({ success: true }) });
+
+  const response = await requestJson('/api/auth/password-login', {
+    email: 'admin@example.com',
+    password: 'admin-password',
+    'cf-turnstile-response': 'valid-token'
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.destination, '/admin');
+  assert.equal(response.body.role, 'admin');
 });
