@@ -135,7 +135,7 @@ app.use((error, req, res, _next) => {
         stack
     });
     if (res.headersSent) {
-        return;
+        return _next(error);
     }
     res.status(500).json({
         error: 'Internal server error',
