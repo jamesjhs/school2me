@@ -1,11 +1,24 @@
 import argon2 from 'argon2';
 import crypto from 'node:crypto';
 import { Router } from 'express';
+import { statSync } from 'node:fs';
 import { env } from '../config/env.js';
 import { db } from '../database/db.js';
 import { requireAdminSession, requireUserSession } from '../middleware/auth.js';
-import { generateUuidBuffer, uuidBufferToString, uuidStringToBuffer } from '../utils/uuid.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { getSmtpSettings } from '../services/email.js';
+import { getAdminEmail } from '../services/adminIdentity.js';
+import { generateUuidBuffer, uuidBufferToString, uuidStringToBuffer } from '../utils/uuid.js';
+const isValidEmail = (value) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.includes(' '))
+        return false;
+    const at = trimmed.indexOf('@');
+    if (at <= 0 || at !== trimmed.lastIndexOf('@'))
+        return false;
+    const domain = trimmed.slice(at + 1);
+    return domain.length >= 3 && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.');
+};
 export const settingsRouter = Router();
 settingsRouter.get('/profile', requireUserSession, (req, res) => {
     const familyId = uuidStringToBuffer(req.user.familyId);
@@ -22,7 +35,7 @@ settingsRouter.get('/profile', requireUserSession, (req, res) => {
        WHERE children.family_id = ?`)
         .all(familyId)
         .map((row) => ({ ...row, id: uuidBufferToString(row.id), child_id: uuidBufferToString(row.child_id) }));
-    res.json({ family, children, activities });
+    res.json({ family, children, activities, user: req.user });
 });
 settingsRouter.post('/children', requireUserSession, (req, res) => {
     const familyId = uuidStringToBuffer(req.user.familyId);
@@ -73,8 +86,85 @@ settingsRouter.post('/invites', requireUserSession, async (req, res) => {
         expiresAt
     });
 });
+settingsRouter.put('/account/password', requireUserSession, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 12) {
+        return res.status(400).json({ error: 'newPassword must be at least 12 characters' });
+    }
+    const user = db
+        .prepare('SELECT id, password_hash FROM users WHERE id = ? LIMIT 1')
+        .get(uuidStringToBuffer(req.user.userId));
+    if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+    }
+    if (user.password_hash) {
+        if (!currentPassword) {
+            return res.status(400).json({ error: 'currentPassword is required' });
+        }
+        const valid = await argon2.verify(user.password_hash, currentPassword);
+        if (!valid) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+    }
+    const passwordHash = await argon2.hash(newPassword);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+    res.json({ ok: true });
+});
+settingsRouter.delete('/account', requireUserSession, (req, res) => {
+    const userId = uuidStringToBuffer(req.user.userId);
+    const tx = db.transaction(() => {
+        db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    });
+    tx();
+    res.clearCookie('s2m_session');
+    res.json({ ok: true });
+});
+settingsRouter.delete('/family', requireUserSession, (req, res) => {
+    const familyId = uuidStringToBuffer(req.user.familyId);
+    db.prepare('DELETE FROM families WHERE id = ?').run(familyId);
+    res.clearCookie('s2m_session');
+    res.json({ ok: true });
+});
 export const adminRouter = Router();
+const adminRouteLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120 });
 adminRouter.use(requireAdminSession);
+adminRouter.use(adminRouteLimiter);
+adminRouter.get('/account', (_req, res) => {
+    res.json({ email: getAdminEmail() });
+});
+adminRouter.put('/account/email', (req, res) => {
+    const { email } = req.body;
+    if (!email || !isValidEmail(email)) {
+        return res.status(400).json({ error: 'Valid email is required' });
+    }
+    db.prepare(`INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`).run('admin_email', email.trim().toLowerCase());
+    res.json({ ok: true, email: email.trim().toLowerCase() });
+});
+adminRouter.get('/system/status', (_req, res) => {
+    let databaseSizeBytes = 0;
+    let sizeAvailable = true;
+    try {
+        databaseSizeBytes = statSync(env.DB_PATH).size;
+    }
+    catch {
+        sizeAvailable = false;
+    }
+    res.json({
+        databaseSizeBytes,
+        sizeAvailable,
+        exportAvailable: true,
+        restoreAvailable: true
+    });
+});
+adminRouter.post('/system/export', (_req, res) => {
+    res.json({ ok: true, message: 'Database export placeholder. Wire to secure snapshot storage.' });
+});
+adminRouter.post('/system/restore', (_req, res) => {
+    res.json({ ok: true, message: 'Database restore placeholder. Wire to secure backup restore flow.' });
+});
 adminRouter.get('/settings/smtp', (_req, res) => {
     res.json(getSmtpSettings());
 });

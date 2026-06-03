@@ -41,7 +41,7 @@ export function TurnstileWidget({
     const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
       if (window.turnstile) {
-        setLoaded(true);
+        queueMicrotask(() => setLoaded(true));
       } else {
         existing.addEventListener('load', () => setLoaded(true), { once: true });
       }

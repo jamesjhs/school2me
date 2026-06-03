@@ -18,11 +18,12 @@ dashboardRouter.get('/summary', requireUserSession, (req, res) => {
 
   const base = env.PUBLIC_BASE_URL.replace(/\/$/, '');
   const alias = family.routing_alias;
+  const publicHost = new URL(env.PUBLIC_BASE_URL).hostname;
 
   res.json({
     userEmail: req.user!.email,
     routingAlias: alias,
-    forwardingEmail: `${alias}@school2me.local`,
+    forwardingEmail: `${alias}@${publicHost}`,
     calendarIcsUrl: `${base}/feeds/${alias}/calendar.ics`,
     rssUrl: `${base}/feeds/${alias}/rss`
   });

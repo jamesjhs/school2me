@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -11,13 +11,13 @@ import argon2 from 'argon2';
 
 const toBuffer = (uuid) => Buffer.from(uuid.replace(/-/g, ''), 'hex');
 
-const requestJson = (port, path, body) =>
+const requestJson = (path, body) =>
   new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = http.request(
       {
         hostname: '127.0.0.1',
-        port,
+        port: globalThis.__authTestPort,
         path,
         method: 'POST',
         headers: {
@@ -41,8 +41,15 @@ const requestJson = (port, path, body) =>
     req.end();
   });
 
-const withAuthApp = async (fetchImpl, run) => {
+let cleanupDir = null;
+let db = null;
+let server = null;
+let originalFetch = null;
+let fetchImpl = async () => ({ ok: true, json: async () => ({ success: true }) });
+
+before(async () => {
   const tempRoot = mkdtempSync(join(tmpdir(), 's2m-auth-test-'));
+  cleanupDir = tempRoot;
   const dbPath = join(tempRoot, 'test.sqlite');
 
   process.env.NODE_ENV = 'development';
@@ -63,11 +70,12 @@ const withAuthApp = async (fetchImpl, run) => {
   process.env.FRONTEND_BASE_URL = 'http://localhost:5173';
   process.env.PUBLIC_BASE_URL = 'http://localhost:5173';
 
-  const originalFetch = global.fetch;
-  global.fetch = fetchImpl;
+  originalFetch = global.fetch;
+  global.fetch = (...args) => fetchImpl(...args);
 
-  const { authRouter } = await import(`../dist/routes/auth.js?${Date.now()}-${Math.random()}`);
-  const { db } = await import(`../dist/database/db.js?${Date.now()}-${Math.random()}`);
+  const { authRouter } = await import('../dist/routes/auth.js');
+  const dbModule = await import('../dist/database/db.js');
+  db = dbModule.db;
 
   const familyId = toBuffer(randomUUID());
   const userId = toBuffer(randomUUID());
@@ -87,74 +95,73 @@ const withAuthApp = async (fetchImpl, run) => {
   app.use(express.json());
   app.use('/api/auth', authRouter);
 
-  const server = app.listen(0);
-
-  try {
-    const address = server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-    await run({ port });
-  } finally {
-    server.close();
-    db.close();
-    global.fetch = originalFetch;
-    rmSync(tempRoot, { recursive: true, force: true });
-  }
-};
-
-test('password login rejects missing turnstile token', async () => {
-  await withAuthApp(async () => ({ ok: true, json: async () => ({ success: true }) }), async ({ port }) => {
-    const response = await requestJson(port, '/api/auth/password-login', {
-      email: 'member@example.com',
-      password: 'user-password',
-      role: 'user'
-    });
-
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error, 'Missing required fields');
+  await new Promise((resolve) => {
+    server = app.listen(0, resolve);
   });
+
+  const address = server.address();
+  globalThis.__authTestPort = typeof address === 'object' && address ? address.port : 0;
 });
 
-test('password login rejects invalid turnstile token', async () => {
-  await withAuthApp(async () => ({ ok: true, json: async () => ({ success: false }) }), async ({ port }) => {
-    const response = await requestJson(port, '/api/auth/password-login', {
-      email: 'member@example.com',
-      password: 'user-password',
-      role: 'user',
-      'cf-turnstile-response': 'invalid-token'
-    });
-
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error, 'Turnstile validation failed');
-  });
+after(() => {
+  server?.close();
+  db?.close();
+  if (originalFetch) global.fetch = originalFetch;
+  if (cleanupDir) rmSync(cleanupDir, { recursive: true, force: true });
 });
 
-test('password login handles turnstile verifier failure', async () => {
-  await withAuthApp(async () => {
+test('password login rejects missing turnstile token', { concurrency: false }, async () => {
+  const response = await requestJson('/api/auth/password-login', {
+    email: 'member@example.com',
+    password: 'user-password',
+    role: 'user'
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'Missing required fields');
+});
+
+test('password login rejects invalid turnstile token', { concurrency: false }, async () => {
+  fetchImpl = async () => ({ ok: true, json: async () => ({ success: false }) });
+
+  const response = await requestJson('/api/auth/password-login', {
+    email: 'member@example.com',
+    password: 'user-password',
+    role: 'user',
+    'cf-turnstile-response': 'invalid-token'
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'Turnstile validation failed');
+});
+
+test('password login handles turnstile verifier failure', { concurrency: false }, async () => {
+  fetchImpl = async () => {
     throw new Error('network error');
-  }, async ({ port }) => {
-    const response = await requestJson(port, '/api/auth/password-login', {
-      email: 'member@example.com',
-      password: 'user-password',
-      role: 'user',
-      'cf-turnstile-response': 'token'
-    });
+  };
 
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error, 'Turnstile validation failed');
+  const response = await requestJson('/api/auth/password-login', {
+    email: 'member@example.com',
+    password: 'user-password',
+    role: 'user',
+    'cf-turnstile-response': 'token'
   });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'Turnstile validation failed');
 });
 
-test('password login succeeds with valid turnstile token', async () => {
-  await withAuthApp(async () => ({ ok: true, json: async () => ({ success: true }) }), async ({ port }) => {
-    const response = await requestJson(port, '/api/auth/password-login', {
-      email: 'member@example.com',
-      password: 'user-password',
-      role: 'user',
-      'cf-turnstile-response': 'valid-token'
-    });
+test('password login succeeds with valid turnstile token', { concurrency: false }, async () => {
+  fetchImpl = async () => ({ ok: true, json: async () => ({ success: true }) });
 
-    assert.equal(response.status, 200);
-    assert.equal(response.body.ok, true);
-    assert.equal(response.body.destination, '/dashboard');
+  const response = await requestJson('/api/auth/password-login', {
+    email: 'member@example.com',
+    password: 'user-password',
+    role: 'user',
+    'cf-turnstile-response': 'valid-token'
   });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.destination, '/dashboard');
 });

@@ -25,7 +25,17 @@ const timingSafeEmailEquals = (input: string, expected: string) => {
   return crypto.timingSafeEqual(one, two);
 };
 
-const normalizeLoginRole = (role: unknown): LoginRole => (role === 'admin' ? 'admin' : 'user');
+const parseLoginRole = (role: unknown): LoginRole | null => {
+  if (role === 'admin' || role === 'user') {
+    return role;
+  }
+
+  if (role == null) {
+    return 'user';
+  }
+
+  return null;
+};
 
 const setCsrfCookie = (res: any): string => {
   const csrfToken = crypto.randomBytes(24).toString('hex');
@@ -112,7 +122,11 @@ authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
     return;
   }
 
-  const loginRole = normalizeLoginRole(role);
+  const loginRole = parseLoginRole(role);
+  if (!loginRole) {
+    return res.status(400).json({ error: 'Invalid login role' });
+  }
+
   if (loginRole === 'admin') {
     const emailValid = timingSafeEmailEquals(email, getAdminEmail());
     const passwordValid = await argon2.verify(env.ADMIN_PASSWORD_HASH, password);
@@ -150,9 +164,8 @@ authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
 });
 
 authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
-  const { email, role, ['cf-turnstile-response']: turnstileToken } = req.body as {
+  const { email, ['cf-turnstile-response']: turnstileToken } = req.body as {
     email?: string;
-    role?: LoginRole;
     'cf-turnstile-response'?: string;
   };
 
@@ -164,7 +177,6 @@ authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
     return;
   }
 
-  const loginRole = normalizeLoginRole(role);
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = hashValue(token);
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
@@ -176,7 +188,7 @@ authRouter.post('/magic-request', strictAuthRateLimiter, async (req, res) => {
     expiresAt
   );
 
-  const loginUrl = `${env.FRONTEND_BASE_URL}/auth?magicToken=${token}&role=${loginRole}`;
+  const loginUrl = `${env.FRONTEND_BASE_URL}/auth?magicToken=${token}`;
   await sendMail({
     to: email,
     subject: 'Your School2Me Magic Link',

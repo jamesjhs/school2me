@@ -62,7 +62,8 @@ export function DashboardPage({ onSessionChange }: { onSessionChange: () => Prom
       ]);
       setSummary(summaryPayload);
       setProfile(profilePayload);
-      setChildId((prev) => prev || profilePayload.children[0]?.id || '');
+      const defaultChildId = profilePayload.children.length > 0 ? profilePayload.children[0].id : '';
+      setChildId((prev) => prev || defaultChildId);
       setInbox(inboxPayload.emails);
       setEvents(eventsPayload.events);
     } catch (err) {
@@ -71,7 +72,11 @@ export function DashboardPage({ onSessionChange }: { onSessionChange: () => Prom
   };
 
   useEffect(() => {
-    void loadDashboard();
+    const timer = window.setTimeout(() => {
+      void loadDashboard();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   const submitChild = async (event: FormEvent) => {

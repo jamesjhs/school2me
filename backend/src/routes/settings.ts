@@ -5,9 +5,21 @@ import { statSync } from 'node:fs';
 import { env } from '../config/env.js';
 import { db } from '../database/db.js';
 import { requireAdminSession, requireUserSession } from '../middleware/auth.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { getSmtpSettings } from '../services/email.js';
 import { getAdminEmail } from '../services/adminIdentity.js';
 import { generateUuidBuffer, uuidBufferToString, uuidStringToBuffer } from '../utils/uuid.js';
+
+const isValidEmail = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes(' ')) return false;
+
+  const at = trimmed.indexOf('@');
+  if (at <= 0 || at !== trimmed.lastIndexOf('@')) return false;
+
+  const domain = trimmed.slice(at + 1);
+  return domain.length >= 3 && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.');
+};
 
 export const settingsRouter = Router();
 
@@ -130,8 +142,8 @@ settingsRouter.put('/account/password', requireUserSession, async (req, res) => 
     newPassword?: string;
   };
 
-  if (!newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: 'newPassword must be at least 8 characters' });
+  if (!newPassword || newPassword.length < 12) {
+    return res.status(400).json({ error: 'newPassword must be at least 12 characters' });
   }
 
   const user = db
@@ -161,8 +173,12 @@ settingsRouter.put('/account/password', requireUserSession, async (req, res) => 
 
 settingsRouter.delete('/account', requireUserSession, (req, res) => {
   const userId = uuidStringToBuffer(req.user!.userId);
-  db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(userId);
-  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  });
+
+  tx();
   res.clearCookie('s2m_session');
   res.json({ ok: true });
 });
@@ -176,7 +192,10 @@ settingsRouter.delete('/family', requireUserSession, (req, res) => {
 
 export const adminRouter = Router();
 
+const adminRouteLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120 });
+
 adminRouter.use(requireAdminSession);
+adminRouter.use(adminRouteLimiter);
 
 adminRouter.get('/account', (_req, res) => {
   res.json({ email: getAdminEmail() });
@@ -184,7 +203,7 @@ adminRouter.get('/account', (_req, res) => {
 
 adminRouter.put('/account/email', (req, res) => {
   const { email } = req.body as { email?: string };
-  if (!email || !email.includes('@')) {
+  if (!email || !isValidEmail(email)) {
     return res.status(400).json({ error: 'Valid email is required' });
   }
 
@@ -199,14 +218,17 @@ adminRouter.put('/account/email', (req, res) => {
 
 adminRouter.get('/system/status', (_req, res) => {
   let databaseSizeBytes = 0;
+  let sizeAvailable = true;
+
   try {
     databaseSizeBytes = statSync(env.DB_PATH).size;
   } catch {
-    databaseSizeBytes = 0;
+    sizeAvailable = false;
   }
 
   res.json({
     databaseSizeBytes,
+    sizeAvailable,
     exportAvailable: true,
     restoreAvailable: true
   });
