@@ -16,25 +16,11 @@ const SESSION_TTL_HOURS = 24 * 14;
 const authRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 const strictAuthRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 8 });
 
-type LoginRole = 'user' | 'admin';
-
 const hashValue = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const timingSafeEmailEquals = (input: string, expected: string) => {
   const one = crypto.createHash('sha256').update(input.toLowerCase().trim()).digest();
   const two = crypto.createHash('sha256').update(expected.toLowerCase().trim()).digest();
   return crypto.timingSafeEqual(one, two);
-};
-
-const parseLoginRole = (role: unknown): LoginRole | null => {
-  if (role === 'admin' || role === 'user') {
-    return role;
-  }
-
-  if (role == null) {
-    return 'user';
-  }
-
-  return null;
 };
 
 const setCsrfCookie = (res: any): string => {
@@ -107,10 +93,9 @@ authRouter.get('/csrf', (_req, res) => {
 });
 
 authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
-  const { email, password, role, ['cf-turnstile-response']: turnstileToken } = req.body as {
+  const { email, password, ['cf-turnstile-response']: turnstileToken } = req.body as {
     email?: string;
     password?: string;
-    role?: LoginRole;
     'cf-turnstile-response'?: string;
   };
 
@@ -122,16 +107,12 @@ authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
     return;
   }
 
-  const loginRole = parseLoginRole(role);
-  if (!loginRole) {
-    return res.status(400).json({ error: 'Invalid login role' });
-  }
-
-  if (loginRole === 'admin') {
-    const emailValid = timingSafeEmailEquals(email, getAdminEmail());
+  const normalizedEmail = email.trim().toLowerCase();
+  const isAdminEmail = timingSafeEmailEquals(normalizedEmail, getAdminEmail());
+  if (isAdminEmail) {
     const passwordValid = await argon2.verify(env.ADMIN_PASSWORD_HASH, password);
 
-    if (!emailValid || !passwordValid) {
+    if (!passwordValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -139,7 +120,7 @@ authRouter.post('/password-login', strictAuthRateLimiter, async (req, res) => {
     return res.json({ ok: true, role: 'admin', destination: '/admin' });
   }
 
-  const user = findUserByEmail(email.trim().toLowerCase());
+  const user = findUserByEmail(normalizedEmail);
   if (!user || !user.password_hash) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }

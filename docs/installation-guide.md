@@ -63,7 +63,7 @@ cp frontend/.env.example frontend/.env
 
 Set:
 
-- `VITE_API_BASE_URL` (for same-origin setups this can be blank)
+- `VITE_API_BASE_URL` (for same-origin setups leave blank; set only when frontend and backend use different origins)
 - `VITE_CF_TURNSTILE_SITE_KEY`
 
 ## 5) Validate installation before first run
@@ -134,7 +134,7 @@ Payload should include common fields (to/recipient, from/sender, subject, text/h
 ## 9) Post-install smoke checks
 
 1. `GET /api/health` returns `{ ok: true, ... }`
-2. `/auth` loads and supports password login or magic-link 2FA for user/admin
+2. `/auth` loads and supports password login or magic-link 2FA (admin is inferred by admin email)
 3. `/dashboard` shows user sections (children, activities, invites, inbox, feeds)
 4. `/admin` shows account/email/webhook/system tabs
 5. `/api/settings/invites` generates share link token

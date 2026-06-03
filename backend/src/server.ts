@@ -11,6 +11,10 @@ import { adminRouter, settingsRouter } from './routes/settings.js';
 import { generateUuidBuffer } from './utils/uuid.js';
 
 const app = express();
+const allowedCorsOrigins = new Set([
+  new URL(env.FRONTEND_BASE_URL).origin,
+  new URL(env.PUBLIC_BASE_URL).origin
+]);
 
 if (env.TRUST_PROXY > 0) {
   app.set('trust proxy', env.TRUST_PROXY);
@@ -19,6 +23,22 @@ if (env.TRUST_PROXY > 0) {
 app.use('/receive', receiveRouter);
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
+app.use((req, res, next) => {
+  const origin = req.header('origin');
+  if (origin && allowedCorsOrigins.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, x-csrf-token');
+    res.header('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,DELETE,OPTIONS');
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  return next();
+});
 
 const csrfExemptPaths = new Set([
   '/api/auth/csrf',

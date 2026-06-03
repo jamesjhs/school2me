@@ -143,6 +143,7 @@ Entry point: `backend/src/server.ts`.
 
 - **Session cookies**: `s2m_session` (user), `s2m_admin_session` (admin), `s2m_csrf` (anti-CSRF token source).
 - **CSRF**: state-changing routes require matching cookie/header token (`x-csrf-token`), except explicit auth bootstrap endpoints.
+- **CORS**: API responses allow credentialed cross-origin requests from configured frontend/public origins.
 - **Rate limiting**: in-memory IP-based limiters for auth and webhook surfaces.
 - **Turnstile**: bot check for login/join request endpoints.
 - **Credential handling**: Argon2 verification for admin and invite password checks.

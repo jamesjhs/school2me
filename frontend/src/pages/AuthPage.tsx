@@ -1,19 +1,17 @@
 import type { FormEvent } from 'react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiPost } from '../api/client';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 import { useAsyncState } from '../hooks/useAsyncState';
 
 type LoginMethod = 'password' | 'magic';
-type LoginRole = 'user' | 'admin';
 
 const turnstileSiteKey = import.meta.env.VITE_CF_TURNSTILE_SITE_KEY ?? '';
 
 export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
   const navigate = useNavigate();
   const [method, setMethod] = useState<LoginMethod>('password');
-  const [role, setRole] = useState<LoginRole>('user');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [token, setToken] = useState(new URLSearchParams(window.location.search).get('magicToken') ?? '');
@@ -21,8 +19,6 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<v
   const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const { loading, error, run } = useAsyncState();
-
-  const title = useMemo(() => `${role === 'admin' ? 'Administrator' : 'User'} Login`, [role]);
 
   const resetTurnstile = () => setTurnstileResetSignal((value) => value + 1);
 
@@ -34,7 +30,6 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<v
       apiPost<{ ok: boolean; destination: string }>('/api/auth/password-login', {
         email,
         password,
-        role,
         'cf-turnstile-response': turnstileToken
       })
     );
@@ -55,7 +50,6 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<v
     const result = await run(() =>
       apiPost<{ ok: boolean }>('/api/auth/magic-request', {
         email,
-        role,
         'cf-turnstile-response': turnstileToken
       })
     );
@@ -86,18 +80,10 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: () => Promise<v
 
   return (
     <main className="mx-auto max-w-2xl rounded-3xl border-2 border-rose-200 bg-white p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Login</h1>
       <p className="mt-1 text-sm text-slate-600">Login with email and password, or email 2FA magic link.</p>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <label className="grid gap-1 text-sm">
-          Login as
-          <select className="rounded-xl border border-slate-200 px-3 py-2" value={role} onChange={(event) => setRole(event.target.value as LoginRole)}>
-            <option value="user">User</option>
-            <option value="admin">Administrator</option>
-          </select>
-        </label>
-
+      <div className="mt-4 grid gap-3">
         <label className="grid gap-1 text-sm">
           Method
           <select className="rounded-xl border border-slate-200 px-3 py-2" value={method} onChange={(event) => setMethod(event.target.value as LoginMethod)}>
